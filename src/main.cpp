@@ -14,13 +14,12 @@ Abode abode;
 bool _running = false;
 bool _gotCredentials = false;
 
-int32_t exitTimer = 0;
+int exitTimer = 0;
+int exitTimerLeft = -1;
 
 bool setNetwork() {
   WiFi.mode(WIFI_STA);
   NetSettings net = AbodeSettings.getNetwork();
-  Serial.println(net.ssid);
-  Serial.println(net.pass);
   WiFi.begin(net.ssid.c_str(), net.pass.c_str());
 
   const short timeout = 12000;
@@ -36,6 +35,7 @@ bool setNetwork() {
 //function to handle gateway mode change
 void statusChange(const char * payload, size_t length) {
   exitTimer = 0;
+  exitTimerLeft = -1;
   screenManager.setMode(payload);
   screenManager.home(); // <------------- needs to be more graceful, is the user on the homepage?
 }
@@ -60,17 +60,25 @@ void disconnectHandler(const char* payload, size_t length) {
 void timelineChange(const char* payload, size_t length) {
   JSONVar data = JSON.parse(payload);
   if (data.hasOwnProperty("event_code")) {
-    const char* temp = (const char*) data["event_code"];
-    int temp2 = atoi(temp);
-    Serial.println(temp2);
+    //const char* temp = (const char*) data["event_code"];
+    //int eventCode = atoi(temp);
+    //Serial.println(eventCode);
+    //switch(atoi(data["event_code"])) {
     switch(atoi(data["event_code"])) {
       case ABODE_EVENT_ARMING:
         Serial.println(data);
         String eventName = (const char*) data["event_name"];
+        String mode = "";
         if (eventName.indexOf("Home") > 0) {
+          mode = ABODE_MODE_HOME;
           exitTimer = millis() + (abode.getExit(ABODE_MODE_HOME)) * 1000;
+          exitTimerLeft = abode.getExit(ABODE_MODE_HOME);
+          screenManager.startTimer(mode, exitTimerLeft);
         } else if (eventName.indexOf("Away") > 0) {
+          mode = ABODE_MODE_AWAY;
           exitTimer = millis() + (abode.getExit(ABODE_MODE_AWAY)) * 1000;
+          exitTimerLeft = abode.getExit(ABODE_MODE_AWAY);
+          screenManager.startTimer(mode, exitTimerLeft);
         }
         break;
     }
@@ -102,11 +110,6 @@ bool configureAbode() {
 
 void setup() {
 
-  //ledcSetup(10, 5000/*freq*/, 10 /*resolution*/);
-  //ledcAttachPin(32, 10);
-  //analogReadResolution(10);
-  //ledcWrite(10,768);
-
   Serial.begin(9600); /* prepare for possible serial debug */
 
   screenManager.begin();
@@ -117,61 +120,36 @@ void setup() {
   } else {
     _gotCredentials = true;
   }
-/*
-    if (setNetwork()) {
-      if (configureAbode()) {
-        Serial.println("Logged in!");
-        screenManager.home();
-        screenManager.setDay();
-        screenManager.wake();
-      } else {
-        Serial.println("Couldn't log in");
-      }
-    } else {
-      Serial.println("Couldn't join network");
-    }
-  }
-*/
 }
 
 void loop() {
   //we need to include the loop for the Abode class
   abode.loop();
-
-  switch (screenManager.loop()) {
-    case REQUEST_MODE_STANDBY:
-      abode.setMode(ABODE_MODE_STANDBY);
-      break;
-    case REQUEST_MODE_HOME:
-      abode.setMode(ABODE_MODE_HOME);
-      break;
-    case REQUEST_MODE_AWAY:
-      abode.setMode(ABODE_MODE_AWAY);
-      break;
-  }
   
-  switch (configure.loop()) {
-    case CONFIGURE_WIFI:
-      Serial.println("Connected to Wifi");
-      Serial.println(AbodeSettings.getNetwork().ssid);
-      if (!_running) {
-        //now we need to get them to sign into Abode
-        configure.abode();
-      }
-      break;
-    case CONFIGURE_ABODE:
-      Serial.println("Got Abode Credentials");
-      //now let's try to login!
-      bool loginSuccess = configureAbode();
-      if (loginSuccess) {
-        _running = true;
-        AbodeSettings.save();
-        screenManager.home();
-      } else {
-        configure.abode();
-      }
-      Serial.println(loginSuccess);
-      break;
+  if (_gotCredentials == false) {
+    switch (configure.loop()) {
+      case CONFIGURE_WIFI:
+        Serial.println("Connected to Wifi");
+        Serial.println(AbodeSettings.getNetwork().ssid);
+        if (!_running) {
+          //now we need to get them to sign into Abode
+          configure.abode();
+        }
+        break;
+      case CONFIGURE_ABODE:
+        Serial.println("Got Abode Credentials");
+        //now let's try to login!
+        bool loginSuccess = configureAbode();
+        if (loginSuccess) {
+          _running = true;
+          AbodeSettings.save();
+          screenManager.home();
+        } else {
+          configure.abode();
+        }
+        Serial.println(loginSuccess);
+        break;
+    }
   }
   
 
@@ -185,19 +163,38 @@ void loop() {
         Serial.println("couldn't connect.");
       }
     }
-    if (abode.isConnected() == false) {
+    if (abode.isConnected() == false && WiFi.isConnected() == true) {
       //connect to Abode
       Serial.print("Connecting to Abode Cloud...");
       if (configureAbode()) {
         Serial.println("done.");
         _running = true;
         screenManager.home();
-        screenManager.setDay();
         screenManager.wake();
       } else {
         Serial.println("couldn't connect.");
       }
     }
+  }
+
+  if (exitTimerLeft >= 0) {
+    int netl = (exitTimer - millis()) / 1000;
+    if(netl < exitTimerLeft) {
+      exitTimerLeft = netl;
+      screenManager.updateTimer(exitTimerLeft);
+    }
+  }
+  
+  switch (screenManager.loop()) {
+    case REQUEST_MODE_STANDBY:
+      abode.setMode(ABODE_MODE_STANDBY);
+      break;
+    case REQUEST_MODE_HOME:
+      abode.setMode(ABODE_MODE_HOME);
+      break;
+    case REQUEST_MODE_AWAY:
+      abode.setMode(ABODE_MODE_AWAY);
+      break;
   }
 }
 

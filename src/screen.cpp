@@ -4,10 +4,9 @@
 
 //ticker for lvgl
 #include <Ticker.h>
-#define LVGL_TICK_PERIOD 20
+#define LVGL_TICK_PERIOD 10
 Ticker tick;
-static void lv_tick_handler(void)
-{
+static void lv_tick_handler(void) {
   lv_tick_inc(LVGL_TICK_PERIOD);
 }
 
@@ -32,10 +31,18 @@ int screenBrightness = 1023; //curent backlight level
 
 //our default colors
 const lv_color_t AbodeBlue = lv_color_hex(0x3BB3CC);
-const lv_color_t AbodeBlueLight = lv_color_hex(0x39C6E3);
+const lv_color_t AbodeBlueLight = lv_color_hex(0x87EBFF);
 const lv_color_t AbodeGreen = lv_color_hex(0x44D8BA);
 const lv_color_t AbodeRed = lv_color_hex(0xDB6654);
 
+const int freq = 5000;
+const int rledChannel = 10;
+const int gledChannel = 11;
+const int bledChannel = 12;
+const int resolution = 8;
+#define RED_LED       A1
+#define BLUE_LED      A0
+//#define GREEN_LED     A2
 
 struct homepage {
   lv_obj_t * outerCircle = NULL;
@@ -43,10 +50,17 @@ struct homepage {
   lv_obj_t * image = NULL;
   lv_obj_t * status = NULL;
   lv_obj_t * chevrons[6];
+  lv_obj_t * leftButton = NULL;
+  lv_obj_t * rightButton = NULL;
+  lv_obj_t * countdown = NULL;
+  bool countdownReady = false;
   bool isShrunk = false;
   short chevronAnim = -1;
 };
 homepage hp;
+
+#define INNER_CIRCLE_DIA  230
+#define OUTER_CIRCLE_DIA  260
 
 
 //return code for the loop function telling the caller what needs to happen (see REQEUST_ defines in screen.h)
@@ -55,8 +69,13 @@ short requestCode = REQUEST_IDLE;
 /* Display flushing function for lvgl/tft_eSPI*/
 void displayFlush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
   _tft.drawBitmap(area->x1, area->y1, area->x2, area->y2, (uint16_t *)color_p);                    // copy 'color_array' to the specifed coordinates
-  lv_disp_flush_ready(disp);  
+  lv_disp_flush_ready(disp);
 }
+
+void my_disp_map(int32_t x1,int32_t y1,int32_t x2,int32_t y2, const lv_color_t* color_p) {
+  _tft.drawBitmap(x1, y1, x2, y2, (uint16_t *)color_p);                        // Copy 'color_p' to the specified area
+}
+
 
 //touch read. this function also handles turning on the display and ignoring touches for that action
 int lastTouch = 0;
@@ -93,22 +112,13 @@ bool touchRead(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
 }
 
 //super bright
-void Screen::setDay() {
-  screenBrightness = 1023;
-  screenState = true;
-  _tft.brightness(255);
-}
-
-//nice and dark
-void Screen::setNight() {
-  screenBrightness = 32;
-  _tft.brightness(32);
-  screenState = true;
+void Screen::setBrightness(short br) {
+  screenBrightness = br;
+  _tft.brightness(br);
 }
 
 //off completely
 void Screen::off() { 
-  //ledcWrite(LED_CHANNEL, 0);
   screenState = false;
   _tft.displayOn(false);
   _tft.backlight(false);
@@ -116,6 +126,7 @@ void Screen::off() {
 
 //on to the current level
 void Screen::wake() {
+  screenState = true;
   lastTouch = millis();
   _tft.displayOn(true);
   _tft.backlight(true);
@@ -156,6 +167,10 @@ void Screen::begin() {
 
   //attach the tick handler to the timer
   tick.attach_ms(LVGL_TICK_PERIOD, lv_tick_handler);
+
+  ledcSetup(bledChannel, freq, resolution);
+  ledcAttachPin(BLUE_LED, bledChannel);
+  ledcWrite(bledChannel, 0);
 }
 
 // a simple loading screen
@@ -163,14 +178,10 @@ void Screen::loading() {
   lv_obj_t * scr = lv_cont_create(NULL, NULL);
   lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, 0, AbodeBlue);
 
-  lv_obj_t * preload = lv_spinner_create(scr, NULL);
-  lv_obj_set_size(preload, 100, 100);
-  lv_obj_align(preload, NULL, LV_ALIGN_CENTER, 0, 0);
-  lv_spinner_set_type(preload, LV_SPINNER_TYPE_CONSTANT_ARC);
-
   lv_scr_load_anim(scr, LV_SCR_LOAD_ANIM_NONE, 250, 500, true);
 }
 
+//resizes a button, keeping the center of the button anchored
 void resizeButton(lv_obj_t *obj, short growBy) {
   lv_anim_path_t path;
   lv_anim_path_init(&path);
@@ -218,14 +229,74 @@ void resizeButton(lv_obj_t *obj, short growBy) {
   
 }
 
-void fadeInOut(lv_obj_t * obj, bool in = true) {
-  if (in == false) {
-    lv_obj_fade_out(obj, 125, 0);
-  } else {
-    lv_obj_fade_in(obj, 125, 0);
+void hideModeSelect(bool resetButton = true) {
+  if (resetButton) {
+    resizeButton(hp.innerCircle, 120);
+    lv_obj_fade_in(hp.image, 125, 0);
+    lv_obj_fade_in(hp.outerCircle, 125, 0);
+    lv_obj_set_hidden(hp.outerCircle, false);
+    lv_obj_set_hidden(hp.image, false);
   }
+  lv_obj_del(hp.leftButton);
+  hp.leftButton = NULL;
+  lv_obj_del(hp.rightButton);
+  hp.rightButton = NULL;
+  for (int i = 0; i < 6; i++) {
+    //remove chevrons
+    lv_obj_del(hp.chevrons[i]);
+    hp.chevrons[i] = NULL;
+  }
+  hp.isShrunk = false;
+
+  lv_obj_set_drag(hp.innerCircle, false);
 }
 
+void buttonFlyToMain(lv_obj_t *obj) {
+
+  lv_coord_t end_x = (_tft.width() / 2) - (INNER_CIRCLE_DIA / 2);
+  lv_coord_t end_y = ((_tft.height() / 2) - (INNER_CIRCLE_DIA / 2) - 48);
+
+  lv_anim_path_t path;
+  lv_anim_path_init(&path);
+  lv_anim_path_set_cb(&path, lv_anim_path_ease_in_out);
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_width);
+  lv_anim_set_var(&a, obj); 
+  lv_anim_set_time(&a, 250);
+  lv_anim_set_values(&a, lv_obj_get_width(obj), INNER_CIRCLE_DIA);
+  lv_anim_set_path(&a, &path);
+  lv_anim_start(&a);
+
+  lv_anim_init(&a);
+  lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_height);
+  lv_anim_set_var(&a, obj); 
+  lv_anim_set_time(&a, 250);
+  lv_anim_set_values(&a, lv_obj_get_height(obj), INNER_CIRCLE_DIA);
+  lv_anim_set_path(&a, &path);
+  lv_anim_start(&a);
+
+  lv_anim_init(&a);
+  lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_x);
+  lv_anim_set_var(&a, obj); 
+  lv_anim_set_time(&a, 250);
+  lv_anim_set_values(&a, lv_obj_get_x(obj), end_x);
+  lv_anim_set_path(&a, &path);
+  lv_anim_start(&a);
+
+  lv_anim_init(&a);
+  lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_y);
+  lv_anim_set_var(&a, obj); 
+  lv_anim_set_time(&a, 250);
+  lv_anim_set_values(&a, lv_obj_get_y(obj), end_y);
+  lv_anim_set_path(&a, &path);
+  lv_anim_start(&a);
+
+  hideModeSelect(false);
+}
+
+//used for the nice chevrons on the home screen
 static void anim_opacity_cb(lv_obj_t * obj, lv_anim_value_t v) {
   lv_obj_set_style_local_opa_scale(obj, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, v);
 };
@@ -235,20 +306,21 @@ void showModeSelect(lv_obj_t * obj, lv_event_t event) {
     if (!hp.isShrunk) {
       hp.isShrunk = true;
 
-      int grow_by = -60;
+      //resize the main circle
+      int grow_by = -120;
       resizeButton(obj, grow_by);
-      fadeInOut(hp.outerCircle, false);
-      fadeInOut(hp.image, false);
 
-      //status label style
-      static lv_style_t state_label;
-      lv_style_init(&state_label);
-      lv_style_set_text_color(&state_label, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-      lv_style_set_text_font(&state_label, LV_STATE_DEFAULT, lv_theme_get_font_subtitle());
+      //fade out the other circles
+      lv_obj_fade_out(hp.image, 125, 0);
+      lv_obj_fade_out(hp.outerCircle, 125, 0);
+
+      //set the main button to be draggable
+      lv_obj_set_drag(obj, true);
+      lv_obj_set_drag_dir(obj, LV_DRAG_DIR_BOTH);
 
       lv_obj_t * scr = lv_scr_act();
 
-      int x = -100;
+      int x = -180;
       int d = 375;
       for (int i = 0; i < 6; i++) {
         //select correct arrow
@@ -258,8 +330,9 @@ void showModeSelect(lv_obj_t * obj, lv_event_t event) {
         //create the arrow
         hp.chevrons[i] = lv_label_create(scr, NULL);
         lv_obj_set_style_local_opa_scale(hp.chevrons[i], LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+        lv_obj_set_style_local_text_font(hp.chevrons[i], LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, &rubik_22);
         lv_label_set_text(hp.chevrons[i], text);
-        lv_obj_align(hp.chevrons[i], scr, LV_ALIGN_CENTER, x, -30);
+        lv_obj_align(hp.chevrons[i], scr, LV_ALIGN_CENTER, x, -48);
 
         lv_anim_t a;
         lv_anim_init(&a);
@@ -275,29 +348,90 @@ void showModeSelect(lv_obj_t * obj, lv_event_t event) {
         lv_anim_start(&a);
 
         //select the next "x" coordinate
-        x = x + 20;
+        x = x + 40;
         if (i > 2) {
           d = d + 125;
         } else if (i < 2) {
           d = d - 125;
         } else {
-          x = 60;
+          x = 100;
         }
-        
       }
 
-      lv_obj_set_drag(obj, true);
-      lv_obj_set_drag_dir(obj, LV_DRAG_DIR_BOTH);
+      //style for a 30% opaque circle (white)
+      static lv_style_t outer_circle_style;
+      lv_style_init(&outer_circle_style);
+      //lv_style_set_bg_color(&outer_circle_style, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+      lv_style_set_radius(&outer_circle_style, LV_STATE_DEFAULT, LV_RADIUS_CIRCLE);
+      lv_style_set_border_width(&outer_circle_style, LV_STATE_DEFAULT, 0);
+
+      //draw the outer circle
+      hp.leftButton = lv_obj_create(scr, NULL);
+      lv_obj_add_style(hp.leftButton, LV_OBJ_PART_MAIN, &outer_circle_style);
+      lv_obj_set_style_local_bg_color(hp.leftButton, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, AbodeGreen);
+      lv_obj_set_size(hp.leftButton, 90, 90);
+      lv_obj_align(hp.leftButton, scr, LV_ALIGN_CENTER, -290, -48);
+      //insert the image
+      lv_obj_t * img = lv_img_create(hp.leftButton, NULL);
+      lv_img_set_src(img, &home_small_white);
+      lv_obj_align(img, hp.leftButton, LV_ALIGN_CENTER, 0, 0);
+
+      //draw the outer circle
+      hp.rightButton = lv_obj_create(scr, NULL);
+      lv_obj_add_style(hp.rightButton, LV_OBJ_PART_MAIN, &outer_circle_style);
+      lv_obj_set_style_local_bg_color(hp.rightButton, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, AbodeRed);
+      lv_obj_set_size(hp.rightButton, 90, 90);
+      lv_obj_align(hp.rightButton, scr, LV_ALIGN_CENTER, 290, -48);
+      //insert the image
+      img = lv_img_create(hp.rightButton, NULL);
+      lv_img_set_src(img, &away_small_white);
+      lv_obj_align(img, hp.rightButton, LV_ALIGN_CENTER, 0, 0);
 
     }
   } else if (event == LV_EVENT_DRAG_END) {
-    //short x = lv_obj_get_x(obj);
+    short x = lv_obj_get_x(obj);
     //short y = lv_obj_get_y(obj);
-    lv_obj_align(obj, lv_scr_act(), LV_ALIGN_CENTER, 0, -30);
-    //Serial.println(x);
+    //lv_coord_t ly = lv_obj_get_y(hp.leftButton);
+    //lv_coord_t ry = lv_obj_get_y(hp.rightButton);
+    
+    lv_coord_t lx = lv_obj_get_x(hp.leftButton);
+
+    lv_coord_t rx = lv_obj_get_x(hp.rightButton);
+
+    if (x > (lx - 45) && x < (lx + 45)) {
+      Serial.println("Left button");
+      //requestCode = REQUEST_MODE_HOME;
+      lv_obj_t * tmp = hp.innerCircle;
+      hp.innerCircle = hp.leftButton;
+      hp.leftButton = tmp;
+      lv_label_set_text(hp.status, "Arming");
+      lv_obj_del(lv_obj_get_child(hp.innerCircle, NULL)); //remove the image
+      lv_obj_align(hp.status, NULL, LV_ALIGN_CENTER, 0, 120);
+      hp.countdown = lv_label_create(lv_scr_act(), hp.status);
+      lv_label_set_text(hp.countdown, "");
+      lv_obj_align(hp.countdown, lv_scr_act(), LV_ALIGN_CENTER, 0, -48);// <!--- needs to be updated with every 'tick'
+      lv_obj_set_style_local_bg_color(lv_scr_act(), LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, AbodeGreen);
+      lv_obj_set_style_local_bg_color(hp.innerCircle, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+      hp.countdownReady = true;
+      buttonFlyToMain(hp.innerCircle);
+    } else if (x > (rx - 45) && x < (rx + 45)) {
+      Serial.println("Right button");
+      //requestCode = REQUEST_MODE_AWAY;
+      lv_obj_t * tmp = hp.innerCircle;
+      hp.innerCircle = hp.rightButton;
+      hp.rightButton = tmp;
+      lv_label_set_text(hp.status, "Arming");
+      lv_obj_del(lv_obj_get_child(hp.innerCircle, NULL)); //remove the image
+      lv_obj_align(hp.status, NULL, LV_ALIGN_CENTER, 0, 120);
+      buttonFlyToMain(hp.innerCircle);
+    } else {
+      lv_obj_align(obj, lv_scr_act(), LV_ALIGN_CENTER, 0, -48);
+      hideModeSelect();
+    }
   }
 }
 void Screen::home() {
+
   Serial.println("Loading home...");
   //need to check if we're already on the home page. if so, we should just change the background color and text and be done
 
@@ -332,9 +466,6 @@ void Screen::home() {
   lv_label_set_text(label, "64" DEGREES_SYMBOL "F");
   lv_obj_align(label, scr, LV_ALIGN_IN_TOP_LEFT, 8, 50);
 
-  int outerSize = round((_tft.height() * 0.43));
-  int innerSize = round(outerSize * 0.95);
-
   //style for a 30% opaque circle (white)
   static lv_style_t outer_circle_style;
   lv_style_init(&outer_circle_style);
@@ -346,8 +477,8 @@ void Screen::home() {
   //draw the outer circle
   lv_obj_t * circle = lv_obj_create(scr, NULL);
   lv_obj_add_style(circle, LV_OBJ_PART_MAIN, &outer_circle_style);
-  lv_obj_set_size(circle, outerSize, outerSize);
-  lv_obj_align(circle, scr, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_set_size(circle, OUTER_CIRCLE_DIA, OUTER_CIRCLE_DIA);
+  lv_obj_align(circle, scr, LV_ALIGN_CENTER, 0, -48);
 
   //use a modified style for the inner circle (opaque)
   static lv_style_t inner_circle_style;
@@ -358,8 +489,8 @@ void Screen::home() {
   //draw the inner circle
   circle = lv_obj_create(scr, NULL);
   lv_obj_add_style(circle, LV_OBJ_PART_MAIN, &inner_circle_style);
-  lv_obj_set_size(circle, innerSize, innerSize);
-  lv_obj_align(circle, scr, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_set_size(circle, INNER_CIRCLE_DIA, INNER_CIRCLE_DIA);
+  lv_obj_align(circle, scr, LV_ALIGN_CENTER, 0, -48);
   lv_obj_set_event_cb(circle, showModeSelect);
   hp.innerCircle = circle;
 
@@ -370,14 +501,14 @@ void Screen::home() {
   } else if(_mode == ABODE_MODE_HOME || _mode == ABODE_MODE_AWAY) {
     lv_img_set_src(img, &icon_home);
   }
-  lv_obj_align(img, NULL, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_align(img, NULL, LV_ALIGN_CENTER, 0, -48);
   hp.image = img;
 
   //status label style
   static lv_style_t state_label;
   lv_style_init(&state_label);
   lv_style_set_text_color(&state_label, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-  lv_style_set_text_font(&state_label, LV_STATE_DEFAULT, lv_theme_get_font_subtitle());
+  lv_style_set_text_font(&state_label, LV_STATE_DEFAULT, &rubik_36);
 
   //lazy way of capitalizing first char (can't believe String doesn't support chaining...)
   String modeString = _mode.substring(0, 1);
@@ -388,7 +519,7 @@ void Screen::home() {
   label = lv_label_create(scr, NULL);
   lv_obj_add_style(label, LV_OBJ_PART_MAIN, &state_label);
   lv_label_set_text(label, modeString.c_str());
-  lv_obj_align(label, scr, LV_ALIGN_CENTER, 0, 68);
+  lv_obj_align(label, scr, LV_ALIGN_CENTER, 0, 120);
   hp.status = label;
 
   //bottom bar style
@@ -415,30 +546,57 @@ void Screen::setState(const char * state) {
 
 void Screen::setMode(String mode) {
   _mode = mode;
+  Screen::wake();
   Serial.print("Mode::");
   Serial.println(_mode);
+  hp.countdownReady = false;
+  if (mode == ABODE_MODE_STANDBY) {
+    ledcWrite(bledChannel, 255);
+  }
 }
 
+void Screen::startTimer(String mode, int seconds) {
+  if(hp.countdownReady == true) {
+    char buffer [10];
+    itoa(seconds, buffer, 10);
+    lv_label_set_text(hp.countdown, buffer);
+    lv_obj_align(hp.countdown, lv_scr_act(), LV_ALIGN_CENTER, 0, -48);// <!--- needs to be updated with every 'tick'
+  }
+}
+
+void Screen::updateTimer(int seconds) {
+  if(hp.countdownReady == true) {
+    char buffer [10];
+    itoa(seconds, buffer, 10);
+    lv_label_set_text(hp.countdown, buffer);
+    lv_obj_align(hp.countdown, lv_scr_act(), LV_ALIGN_CENTER, 0, -48);// <!--- needs to be updated with every 'tick'
+  }
+}
+
+int lastBrightnessChange = 0;
+short lastBrightness = 0;
+#define BRIGHTNESS_INTERVAL 3000
 short Screen::loop() {
+  int m = millis();
   lv_task_handler();
 
-  if (screenState && millis() > lastTouch + SCREEN_TIMEOUT) {
+  if (screenState && m > lastTouch + SCREEN_TIMEOUT) {
     Screen::off();
   }
 
-  if(hp.isShrunk && millis() > (lastTouch + 3000)) {
-      int grow_by = 60;
-      resizeButton(hp.innerCircle, grow_by);
-      fadeInOut(hp.outerCircle);
-      fadeInOut(hp.image);
-      for (int i = 0; i < 6; i++) {
-        //remove chevrons
-        lv_obj_del(hp.chevrons[i]);
-        hp.chevrons[i] = NULL;
-      }
-      hp.isShrunk = false;
+  if(hp.isShrunk && m > (lastTouch + 3000)) {
+    hideModeSelect();
+  }
 
-      lv_obj_set_drag(hp.innerCircle, false);
+  short lightness = map(analogRead(LIGHT_SENSOR_PIN), 0, 4095, 1, 255);
+  if ((lightness > (lastBrightness + 20) || lightness < (lastBrightness - 20)) && (m > lastBrightnessChange + BRIGHTNESS_INTERVAL)) {
+    _tft.brightness(lightness); /// <!--- TODO: Smooth brightness change
+    if(_mode == ABODE_MODE_STANDBY) {
+      Serial.println(lightness);
+      ledcWrite(bledChannel, lightness);
+    }
+    lastBrightnessChange = m;
+    lastBrightness = lightness;
   }
 
   //now return any requests to the main loop
