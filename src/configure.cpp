@@ -166,7 +166,7 @@ void enterKey(lv_obj_t * obj, lv_event_t event) {
     lv_obj_set_width(ta, 240);
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_pwd_mode(ta, true);
-    lv_textarea_set_text(ta, "InThePNW1234");
+    lv_textarea_set_text(ta, "");
     lv_textarea_set_cursor_hidden(ta, true);
     lv_textarea_set_placeholder_text(ta, "Password");
     lv_obj_align(ta, NULL, LV_ALIGN_IN_TOP_MID, 0, 65);
@@ -220,7 +220,7 @@ void abodePassword(lv_obj_t * obj, lv_event_t event) {
     lv_obj_set_width(ta_apass, 240);
     lv_textarea_set_one_line(ta_apass, true);
     lv_textarea_set_pwd_mode(ta_apass, true);
-    lv_textarea_set_text(ta_apass, "qqirgZY5iqtNWt8");
+    lv_textarea_set_text(ta_apass, "");
     lv_textarea_set_cursor_hidden(ta_apass, true);
     lv_textarea_set_placeholder_text(ta_apass, "Password");
     lv_obj_align(ta_apass, NULL, LV_ALIGN_IN_TOP_MID, 0, 70);
@@ -251,12 +251,10 @@ void abodeEmail() {
     ta_aemail = lv_textarea_create(scr, NULL);
     lv_obj_set_width(ta_aemail, 240);
     lv_textarea_set_one_line(ta_aemail, true);
-    //lv_textarea_set_text(ta, _abodeEmail.c_str());
-    lv_textarea_set_text(ta_aemail, "gil.philbert@googlemail.com");
+    lv_textarea_set_text(ta_aemail, _abodeEmail.c_str());
     lv_textarea_set_cursor_hidden(ta_aemail, true);
     lv_textarea_set_placeholder_text(ta_aemail, "Email address");
     lv_obj_align(ta_aemail, NULL, LV_ALIGN_IN_TOP_MID, 0, 35);
-    //lv_obj_set_event_cb(ta, saveAEmail);
 
     lv_obj_t * kb = lv_keyboard_create(scr, NULL);
     lv_keyboard_set_cursor_manage(kb, true);
