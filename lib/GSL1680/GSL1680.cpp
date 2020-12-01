@@ -40,7 +40,7 @@ void GSL1680::begin(uint8_t WAKE, uint8_t INTRPT) {
 	delay(50);
 	digitalWrite(WAKE, HIGH);
 	delay(30);
-    Wire.begin();
+    Wire.begin(21, 22);
 
     // CTP startup sequence
 	//Serial.println("Clear reg");
