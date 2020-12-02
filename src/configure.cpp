@@ -93,7 +93,6 @@ void Configure::wifiSelect(void) {
 }
 
 void Configure::welcome(void) {
-
   lv_obj_t * scr1 = lv_obj_create(NULL, NULL);
   //lv_obj_set_style_local_bg_color(scr1, LV_OBJ_PART_MAIN, 0, primary_color);
 

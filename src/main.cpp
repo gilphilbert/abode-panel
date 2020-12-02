@@ -127,6 +127,7 @@ void loop() {
   abode.loop();
   
   if (_gotCredentials == false) {
+    //screenManager.wake();
     switch (configure.loop()) {
       case CONFIGURE_WIFI:
         Serial.println("Connected to Wifi");
